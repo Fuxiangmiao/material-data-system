@@ -52,7 +52,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: '服务器内部错误' });
 });
 
-app.listen(config.port, () => {
+app.listen(config.port, '0.0.0.0', () => {
   console.log(`🚀 物料数据管理系统后端已启动: http://localhost:${config.port}`);
   console.log(`📋 API 文档: http://localhost:${config.port}/api/health`);
 });
