@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Environment (contains secrets — use .env.example as template)
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# Uploaded files
+server/uploads/
+*.upload
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.cache/
+*.tsbuildinfo
+
+# Coverage
+coverage/
+
+# Misc
+*.tar.gz
+*.zip
