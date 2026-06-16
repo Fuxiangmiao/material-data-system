@@ -8,7 +8,6 @@ import DataTable from '../components/Search/DataTable';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import * as XLSX from 'xlsx';
 
-const PAGE_SIZE = 20;
 const MODULE_LABELS = { material: '物料数据', selection: '选型库', overseas: '海外承认' };
 
 export default function SearchPage({ module, title }) {
@@ -27,7 +26,6 @@ export default function SearchPage({ module, title }) {
 
   const [records, setRecords] = useState(savedState?.items || []);
   const [total, setTotal] = useState(savedState?.total || 0);
-  const [page, setPage] = useState(savedState?.page || 1);
   const [loading, setLoading] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState(savedState?.searchKeyword || '');
   const [currentFieldFilters, setCurrentFieldFilters] = useState(savedState?.currentFieldFilters || {});
@@ -40,23 +38,21 @@ export default function SearchPage({ module, title }) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   // Save state to sessionStorage
   const saveState = useCallback(() => {
     try {
       sessionStorage.setItem(storagePrefix, JSON.stringify({
-        searchKeyword, items: records, total, page, stats, hasSearched, currentFieldFilters,
+        searchKeyword, items: records, total, stats, hasSearched, currentFieldFilters,
       }));
     } catch {}
-  }, [storagePrefix, searchKeyword, records, total, page, stats, hasSearched, currentFieldFilters]);
+  }, [storagePrefix, searchKeyword, records, total, stats, hasSearched, currentFieldFilters]);
 
   useEffect(() => {
     if (hasSearched && (records.length > 0 || total > 0)) saveState();
   }, [records, total, hasSearched, saveState]);
 
-  // Fetch results from server
-  const fetchResults = useCallback(async (kw, p, fieldFilters) => {
+  // Fetch results from server (一次性获取所有数据，由 DataTable 客户端分页)
+  const fetchResults = useCallback(async (kw, fieldFilters) => {
     setLoading(true);
     try {
       const activeFilters = {};
@@ -64,7 +60,7 @@ export default function SearchPage({ module, title }) {
         if (v && v.trim()) activeFilters[k] = v.trim();
       }
       const params = {
-        module, search: kw, page: p, pageSize: PAGE_SIZE,
+        module, search: kw, pageSize: 2000, // 获取足够多的数据
         ...(Object.keys(activeFilters).length > 0 ? { fieldFilters: JSON.stringify(activeFilters) } : {}),
       };
       const res = await api.get('/records', { params });
@@ -92,10 +88,9 @@ export default function SearchPage({ module, title }) {
   const handleSearch = useCallback((kw, fieldFilters) => {
     setSearchKeyword(kw);
     setCurrentFieldFilters(fieldFilters);
-    setPage(1);
     setSelectedIds(new Set());
     setHasSearched(true);
-    fetchResults(kw, 1, fieldFilters);
+    fetchResults(kw, fieldFilters);
     if (kw || Object.values(fieldFilters).some((v) => v && v.trim())) {
       fetchStats(kw, fieldFilters);
     } else {
@@ -106,16 +101,10 @@ export default function SearchPage({ module, title }) {
   // Reset handler
   const handleReset = useCallback(() => {
     setSearchKeyword(''); setRecords([]); setTotal(0); setStats(null);
-    setPage(1); setSelectedIds(new Set()); setHasSearched(false);
+    setSelectedIds(new Set()); setHasSearched(false);
     setCurrentFieldFilters({});
     try { sessionStorage.removeItem(storagePrefix); } catch {}
   }, [storagePrefix]);
-
-  // Page change
-  const handlePageChange = useCallback((newPage) => {
-    setPage(newPage);
-    fetchResults(searchKeyword, newPage, currentFieldFilters);
-  }, [searchKeyword, currentFieldFilters, fetchResults]);
 
   // Export to Excel (client-side using xlsx)
   const handleExport = useCallback(async () => {
@@ -168,7 +157,7 @@ export default function SearchPage({ module, title }) {
         alert(res.message);
         setSelectedIds(new Set());
         setDeleteConfirmOpen(false);
-        fetchResults(searchKeyword, page, currentFieldFilters);
+        fetchResults(searchKeyword, currentFieldFilters);
       }
     } finally {
       setDeleting(false);
@@ -294,32 +283,6 @@ export default function SearchPage({ module, title }) {
               )}
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {total > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm px-4 py-3">
-          <span className="text-xs text-slate-500">第 {page} / {totalPages} 页</span>
-          <div className="flex gap-1">
-            <button onClick={() => handlePageChange(page - 1)} disabled={page <= 1}
-              className="px-2.5 py-1 text-xs bg-slate-100 text-slate-600 rounded hover:bg-slate-200 disabled:opacity-30 transition">
-              上一页
-            </button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const p = totalPages <= 5 ? i + 1 : page <= 3 ? i + 1 : page >= totalPages - 2 ? totalPages - 4 + i : page - 2 + i;
-              return (
-                <button key={p} onClick={() => handlePageChange(p)}
-                  className={`w-7 h-7 text-xs rounded transition ${p === page ? 'bg-primary text-white font-medium' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                  {p}
-                </button>
-              );
-            })}
-            <button onClick={() => handlePageChange(page + 1)} disabled={page >= totalPages}
-              className="px-2.5 py-1 text-xs bg-slate-100 text-slate-600 rounded hover:bg-slate-200 disabled:opacity-30 transition">
-              下一页
-            </button>
-          </div>
         </div>
       )}
 

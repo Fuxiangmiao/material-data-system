@@ -10,8 +10,14 @@ const MODULE_TITLES = {
   overseas: '海外物料承认管理',
 };
 
+const MODULE_OPTIONS = [
+  { value: 'material', label: '📦 物料数据管理' },
+  { value: 'selection', label: '🧩 物料选型库管理' },
+  { value: 'overseas', label: '🌏 海外物料承认管理' },
+];
+
 export default function DataInitPage() {
-  const { module } = useParams();
+  const { module: urlModule } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -21,18 +27,27 @@ export default function DataInitPage() {
   const [filterKeyword, setFilterKeyword] = useState('');
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [showConfirmFilter, setShowConfirmFilter] = useState(false);
+  const [selectedModule, setSelectedModule] = useState(urlModule || 'material');
 
   // 条件删除预览
-  const [previewRecords, setPreviewRecords] = useState(null);
+  const [previewRecords, setPreviewRecords] = useState([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [matchedTotal, setMatchedTotal] = useState(0); // 匹配的记录总数
 
-  // Fetch stats on mount
+  // Fetch stats on mount or module change
   useEffect(() => {
-    getStatistics(module, '', {}).then((res) => {
+    getStatistics(selectedModule, '', {}).then((res) => {
       if (res.success) setStats(res.data);
     }).catch(() => {});
-  }, [module]);
+    // 切换模块时重置筛选条件
+    setFilterType('');
+    setFilterSource('');
+    setFilterKeyword('');
+    setPreviewRecords([]);
+    setSelectedIds(new Set());
+    setMatchedTotal(0);
+  }, [selectedModule]);
 
   if (user?.role !== 'admin') {
     return (
@@ -46,7 +61,7 @@ export default function DataInitPage() {
   }
 
   const refreshStats = () => {
-    getStatistics(module, '', {}).then((res) => {
+    getStatistics(selectedModule, '', {}).then((res) => {
       if (res.success) setStats(res.data);
     }).catch(() => {});
   };
@@ -55,7 +70,7 @@ export default function DataInitPage() {
     setShowConfirmClear(false);
     setLoading(true);
     try {
-      const res = await initDatabase(module);
+      const res = await initDatabase(selectedModule);
       if (res.success) alert(res.message);
       refreshStats();
     } catch (err) {
@@ -69,7 +84,6 @@ export default function DataInitPage() {
     setShowConfirmFilter(false);
     setLoading(true);
     try {
-      // 删除选中的记录
       const ids = Array.from(selectedIds);
       if (ids.length === 0) {
         alert('请选择要删除的记录');
@@ -78,8 +92,9 @@ export default function DataInitPage() {
       const res = await api.post('/records/batch-delete', { ids });
       if (res.success) {
         alert(res.message);
-        setPreviewRecords(null);
+        setPreviewRecords([]);
         setSelectedIds(new Set());
+        setMatchedTotal(0);
         refreshStats();
       }
     } catch (err) {
@@ -98,15 +113,22 @@ export default function DataInitPage() {
     setPreviewLoading(true);
     setSelectedIds(new Set());
     try {
-      const params = { module, pageSize: 200 };
-      if (filterKeyword.trim()) params.search = filterKeyword.trim();
-      const res = await api.get('/records', { params });
-      if (res.success) {
-        let filtered = res.data || [];
-        // 客户端过滤 type 和 source
-        if (filterType) filtered = filtered.filter((r) => r.type === filterType);
-        if (filterSource) filtered = filtered.filter((r) => r.source === filterSource);
-        setPreviewRecords(filtered);
+      // 获取总数
+      const countParams = { module: selectedModule, pageSize: 1, page: 1 };
+      if (filterKeyword.trim()) countParams.search = filterKeyword.trim();
+      if (filterType) countParams.type = filterType;
+      if (filterSource) countParams.source = filterSource;
+
+      const countRes = await api.get('/records', { params: countParams });
+      if (countRes.success) {
+        setMatchedTotal(countRes.pagination?.total || 0);
+
+        // 获取预览数据（最多500条）
+        const params = { ...countParams, pageSize: 500 };
+        const res = await api.get('/records', { params });
+        if (res.success) {
+          setPreviewRecords(res.data || []);
+        }
       }
     } catch (err) {
       alert(err.message || '搜索失败');
@@ -123,12 +145,33 @@ export default function DataInitPage() {
     });
   };
 
-  const toggleSelectAll = () => {
-    if (!previewRecords) return;
-    if (selectedIds.size === previewRecords.length) {
+  const toggleSelectAll = async () => {
+    if (selectedIds.size === matchedTotal && matchedTotal > 0) {
+      // 取消全选
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(previewRecords.map((r) => r.id)));
+      // 全选：通过 API 获取所有匹配的 ID
+      setPreviewLoading(true);
+      try {
+        const params = {
+          module: selectedModule,
+          pageSize: 1000,
+          page: 1,
+          search: filterKeyword.trim() || undefined,
+          type: filterType || undefined,
+          source: filterSource || undefined,
+        };
+
+        const res = await api.get('/records', { params });
+        if (res.success) {
+          const allIds = (res.data || []).map((r) => r.id);
+          setSelectedIds(new Set(allIds));
+        }
+      } catch (err) {
+        alert(err.message || '获取全部记录失败');
+      } finally {
+        setPreviewLoading(false);
+      }
     }
   };
 
@@ -138,16 +181,36 @@ export default function DataInitPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-800">{MODULE_TITLES[module]} - 数据初始化</h1>
-        <button onClick={() => navigate(`/${module}`)} className="px-3 py-1.5 text-sm bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition">
+        <h1 className="text-xl font-bold text-slate-800">数据初始化</h1>
+        <button onClick={() => navigate(`/${selectedModule}`)} className="px-3 py-1.5 text-sm bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition">
           ← 返回检索
         </button>
+      </div>
+
+      {/* Module Selector */}
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <label className="block text-sm font-medium text-slate-700 mb-2">选择物料数据库</label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {MODULE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setSelectedModule(opt.value)}
+              className={`px-4 py-3 text-sm rounded-lg border-2 transition text-left ${
+                selectedModule === opt.value
+                  ? 'border-primary bg-primary/5 text-primary font-medium'
+                  : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Statistics Overview */}
       {stats && (
         <div className="bg-white rounded-lg shadow-sm p-4">
-          <h3 className="text-sm font-medium text-slate-700 mb-3">📊 数据概览</h3>
+          <h3 className="text-sm font-medium text-slate-700 mb-3">📊 {MODULE_TITLES[selectedModule]} - 数据概览</h3>
           <div className="grid grid-cols-4 gap-3 mb-3">
             <div className="bg-slate-50 rounded-lg p-3 text-center">
               <p className="text-2xl font-bold text-slate-700">{stats.totalCount}</p>
@@ -183,7 +246,7 @@ export default function DataInitPage() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h3 className="text-lg font-semibold text-red-600 mb-3">⚠️ 一键清除</h3>
           <p className="text-sm text-slate-600 mb-4">
-            清除「{MODULE_TITLES[module]}」模块的全部 {stats?.totalCount || 0} 条数据。此操作不可恢复。
+            清除「{MODULE_TITLES[selectedModule]}」模块的全部 {stats?.totalCount || 0} 条数据。此操作不可恢复。
           </p>
           <button onClick={() => setShowConfirmClear(true)} disabled={loading || (stats?.totalCount || 0) === 0}
             className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition font-medium">
@@ -233,23 +296,24 @@ export default function DataInitPage() {
         </div>
 
         {/* Preview results */}
-        {previewRecords && (
+        {previewRecords.length > 0 && (
           <div className="border border-slate-200 rounded-lg">
             <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-200">
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
-                  <input type="checkbox" checked={previewRecords.length > 0 && selectedIds.size === previewRecords.length}
+                  <input type="checkbox" checked={selectedIds.size === matchedTotal && matchedTotal > 0}
                     onChange={toggleSelectAll} className="rounded border-slate-300" />
                   全选
                 </label>
                 <span className="text-xs text-slate-500">
-                  匹配 {previewRecords.length} 条，已选 {selectedIds.size} 条
+                  筛选结果：共 {matchedTotal} 条，预览 {previewRecords.length} 条
+                  {selectedIds.size > 0 && <span className="text-orange-600 font-medium ml-1">（已选 {selectedIds.size} 条）</span>}
                 </span>
               </div>
               <button onClick={() => setShowConfirmFilter(true)}
                 disabled={loading || selectedIds.size === 0}
                 className="px-4 py-1.5 text-xs bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 transition font-medium">
-                {loading ? '处理中...' : `🗑️ 删除选中 (${selectedIds.size})`}
+                {loading ? '处理中...' : `🗑️ 删除选中 (${selectedIds.size}) 条`}
               </button>
             </div>
             <div className="max-h-64 overflow-y-auto">
@@ -297,15 +361,22 @@ export default function DataInitPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowConfirmFilter(false)}>
           <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div className="text-center">
-              <div className="text-3xl mb-2">🔍</div>
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">确认按条件删除？</h3>
+              <div className="text-3xl mb-2"></div>
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">确认删除选中记录？</h3>
               <p className="text-xs text-slate-500 mb-4">
-                条件：{filterType && `类型=${filterType}`} {filterSource && `来源=${filterSource}`} {filterKeyword && `关键词=${filterKeyword}`}
+                将删除选中的 {selectedIds.size} 条记录，此操作不可恢复。
               </p>
+              <div className="text-xs text-slate-600 bg-slate-50 rounded p-2 mb-4 text-left">
+                {filterType && <div>类型：{filterType}</div>}
+                {filterSource && <div>来源：{filterSource}</div>}
+                {filterKeyword && <div>关键词：{filterKeyword}</div>}
+              </div>
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowConfirmFilter(false)} className="px-3 py-1.5 text-xs bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">取消</button>
-              <button onClick={handleFilterDelete} className="px-4 py-1.5 text-xs bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">确认删除</button>
+              <button onClick={handleFilterDelete} className="px-4 py-1.5 text-xs bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">
+                确认删除
+              </button>
             </div>
           </div>
         </div>

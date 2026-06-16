@@ -35,8 +35,10 @@ npm-debug.log*
 # Coverage
 coverage/
 
-# Nexus
+# Claude/Inforge/Nexus
+.claude/
 .insforge-nexus/
+*.code-workspace
 
 # Misc
 *.tar.gz

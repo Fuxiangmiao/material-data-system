@@ -88,7 +88,7 @@ router.get('/', async (req, res) => {
 
 function getFixedKeys(module) {
   const map = {
-    material: ['物料编号', '物料名称', '单颗物料净重（g）'],
+    material: ['物料编号', '物料名称', '单颗物料净重(g)'],
     selection: ['物料分类', '材质名称', '应用场景'],
     overseas: ['物料编号', '描述', '承认工厂&供应商'],
   };
